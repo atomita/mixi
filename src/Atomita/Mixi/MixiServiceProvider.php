@@ -31,7 +31,7 @@ class MixiServiceProvider extends ServiceProvider {
 		$this->app['mixi'] = $this->app->share(function($app) {
 			$config = array(
 				'consumer_key'		 => $app['config']->get('mixi::consumer_key'),
-				'consumer_secret'	 => $app['config']->get('mixi::consumer_key'),
+				'consumer_secret'	 => $app['config']->get('mixi::consumer_secret'),
 				'permissions'		 => '',
 				'redirect_uri'		 => '',
 				'display'			 => 'touch'

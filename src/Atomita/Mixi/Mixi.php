@@ -30,8 +30,10 @@ class Mixi {
 
 	public function __construct($config) {
 		$this->$config = array_merge(array(
-			self::CONSUMER_KEY		 => '', self::CONSUMER_SECRET	 => '',
-			self::SCOPE				 => '', self::REDIRECT_URL		 => '',
+			self::CONSUMER_KEY		 => '',
+			self::CONSUMER_SECRET	 => '',
+			self::SCOPE				 => 'r_profile',
+			self::REDIRECT_URL		 => '',
 			self::DISPLAY			 => 'touch')
 				, $config);
 

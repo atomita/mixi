@@ -29,13 +29,7 @@ class MixiServiceProvider extends ServiceProvider {
 	 */
 	public function register() {
 		$this->app['mixi'] = $this->app->share(function($app) {
-			$config = array(
-				'consumer_key'		 => $app['config']->get('mixi::consumer_key'),
-				'consumer_secret'	 => $app['config']->get('mixi::consumer_secret'),
-				'permissions'		 => '',
-				'redirect_uri'		 => '',
-				'display'			 => 'touch'
-			);
+			$config = $app['config']->get('mixi::config');
 //			if (!in_array($config['display'], array('touch', 'pc', 'smartphone', 'ios'))) {
 //				$config['display'] = 'touch';
 //			}

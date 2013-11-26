@@ -16,7 +16,7 @@ class Mixi {
 	const CONSUMER_KEY		 = 'consumer_key';
 	const CONSUMER_SECRET		 = 'consumer_secret';
 	const SCOPE				 = 'scope';
-	const REDIRECT_URL		 = 'redirect_uri';
+	const REDIRECT_URI		 = 'redirect_uri';
 	const DISPLAY				 = 'display';
 	const ACCESS_TOKEN		 = 'access_token';
 	const REFRESH_TOKEN		 = 'refresh_token';
@@ -33,7 +33,7 @@ class Mixi {
 			self::CONSUMER_KEY		 => '',
 			self::CONSUMER_SECRET	 => '',
 			self::SCOPE				 => 'r_profile',
-			self::REDIRECT_URL		 => '',
+			self::REDIRECT_URI		 => '',
 			self::DISPLAY			 => 'touch')
 				, $config);
 
@@ -47,7 +47,7 @@ class Mixi {
 				'client_id'			 => $this->_config[self::CONSUMER_KEY],
 				'client_secret'		 => $this->_config[self::CONSUMER_SECRET],
 				'code'				 => $_GET['code'],
-				self::REDIRECT_URL	 => $this->_config[self::REDIRECT_URL],
+				self::REDIRECT_URI	 => $this->_config[self::REDIRECT_URI],
 			);
 			$this->_getToken($data);
 		}

@@ -28,8 +28,8 @@ class Mixi {
 	protected $_nowGetTokenFlag	 = false;
 	protected $_user			 = null;
 
-	public function __construct($config) {
-		$this->$config = array_merge(array(
+	public function __construct(array $config) {
+		$this->_config = array_merge(array(
 			self::CONSUMER_KEY		 => '',
 			self::CONSUMER_SECRET	 => '',
 			self::SCOPE				 => 'r_profile',
@@ -366,7 +366,7 @@ class Mixi {
 			);
 		}
 
-		list($head, $body) = AttoRequestHelper::request($method, $url, $content, $params);
+		list($head, $body) = $this->httpRequest($method, $url, $content, $params);
 
 
 		$error = $this->_isErrorResponse($body, $head);
@@ -447,13 +447,379 @@ class Mixi {
 		return (0 === strpos($subject, $search));
 	}
 
+	public function ends_with($search, $subject) {
+		$l = strlen($search);
+		return ($l <= strlen($subject) && $search == substr($subject, -1 * $l));
+	}
+
+	protected function httpRequest($method, $url, $content = null, array $params = array()) {
+		if ($method == 'GET') {
+			return $this->httpGet($url, $content, $params);
+		}
+		else {
+			return $this->httpPost($url, $content, $params);
+		}
+	}
+
+	/**
+	 * httpGet
+	 * 
+	 * @param string $url
+	 * @param array $params
+	 * @param mixed $content
+	 * @return array header, body
+	 */
+	protected function httpGet($url, $content = null, array $params = array()) {
+		if ($content) {
+			if (is_string($content)) {
+				$get = $url . '?' . $content;
+			}
+			else {
+				$get = $url . '?' . http_build_query($content);
+			}
+		}
+		else {
+			$get = $url;
+		}
+
+		$context = stream_context_create(array('http' => $params));
+		$body	 = file_get_contents($get, false, $context);
+		return array($http_response_header, $body);
+	}
+
+	/**
+	 * httpPost
+	 * 
+	 * $contentには、http_build_query関数の結果か、makeMultipartContentメソッドで解釈できるarrayを渡すこと
+	 * 
+	 * array( 'name' => 'content' )
+	 * array( 'name' => '@filepath' )
+	 * array( 'name' => array( 'file' => 'filepath' [, 'name' => 'filename'][, 'type' => 'Content-Type value'][, 'encoding' => 'Content-Transfer-Encoding value'] ) )
+	 * array( 'name' => array( 'content' => 'content' [, 'name' => 'contentname'][, 'type' => 'Content-Type value'][, 'encoding' => 'Content-Transfer-Encoding value'] ) )
+	 * 
+	 * @method post
+	 * @param string $url
+	 * @param mixed $content	string(http query) or array(multi part)
+	 * @param array $params
+	 * @return array header, body
+	 */
+	protected function httpPost($url, $content = null, array $params = array()) {
+		$params['method']		 = 'POST';
+		$params['user_agent']	 = 'atomita/mixi#httpPost';
+
+		// content
+		if (is_array($content)) {
+			$boundary	 = '---------------------' . substr(md5(rand(0, 32000)), 0, 10);
+			$content	 = $this->makeMultipartContent($content, $boundary);
+		}
+		if ($content) {
+			$params['content'] = $content;
+		}
+
+		// header
+		if (isset($params['header'])) {
+			if (is_string($params['header'])) {
+				$params['header'] = explode("\r\n", $params['header']);
+			}
+			$headers_kv = array();
+			foreach ($params['header'] as $key => $value) {
+				if (is_int($key)) {
+					list($k, $v) = explode(':', $value, 2);
+					if (trim($k) && trim($v)) {
+						$headers_kv[trim($k)] = trim($v);
+					}
+					else {
+						$headers_kv[] = $value;
+					}
+				}
+				else {
+					$headers_kv[$key] = $value;
+				}
+			}
+			if (isset($boundary)) {
+				unset($headers_kv['Content-Type']);
+				$headers = array("Content-Type: multipart/form-data; boundary={$boundary}");
+			}
+			foreach ($headers_kv as $key => $value) {
+				if (is_int($key)) {
+					$headers[] = $value;
+				}
+				else {
+					$headers[] = $key . ': ' . $value;
+				}
+			}
+			$params['header'] = implode("\r\n", $headers);
+		}
+		else {
+			$params['header'] = isset($boundary) ? "Content-Type: multipart/form-data; boundary={$boundary}" : '';
+		}
+
+		$context = stream_context_create(array('http' => $params));
+		$body	 = file_get_contents($url, false, $context);
+		return array($http_response_header, $body);
+	}
+
+	/**
+	 * makeMultipartContent
+	 * 
+	 * @param array $contents
+	 * @param string $boundary
+	 * @return string 
+	 */
+	protected function makeMultipartContent(array $contents, $boundary) {
+		$rows = array('--' . $boundary);
+
+		foreach ($contents as $key => $value) {
+			$rows[] = 'Content-Disposition: form-data; name="' . $key . '"';
+
+			if (is_array($value) || (0 === strpos($value, '@') && file_exists($file = substr($value, 1)))) {
+
+				$type		 = $encoding	 = $content	 = $name		 = null;
+				if (is_array($value)) {
+					if (isset($value['file'])) {
+						$file = $value['file'];
+					}
+					else {
+						$file = null;
+					}
+					if (isset($value['name'])) {
+						$name = $value['name'];
+					}
+					if (isset($value['content'])) {
+						$content = $value['content'];
+					}
+					if (isset($value['type'])) {
+						$type = $value['type'];
+					}
+					if (isset($value['encoding'])) {
+						$encoding = $value['encoding'];
+					}
+				}
+				if (!$type && $file) {
+					$type = $this->getByFileName($file);
+				}
+				if (!$encoding && $type) {
+					if (!$this->starts_with('text', $type) && !$this->ends_with('xml', $type) && !$this->ends_with('json', $type) && !$this->ends_with('script', $type)) {
+						$encoding = 'binary';
+					}
+				}
+				if (!$name && $file) {
+					$name = basename($file);
+				}
+
+				if ($name) {
+					$rows[count($rows) - 1] .= '; filename=' . $name;
+				}
+				if ($type) {
+					$rows[] = 'Content-Type: ' . $type;
+				}
+				if ($encoding) {
+					$rows[] = 'Content-Transfer-Encoding: ' . $encoding;
+				}
+
+				if ($file) {
+					$value = file_get_contents($file);
+				}
+				else {
+					$value = $content;
+				}
+			}
+			$rows[]	 = '';
+			$rows[]	 = $value;
+			$rows[]	 = '--' . $boundary;
+		}
+		$rows[] = '';
+		return implode("\r\n", $rows);
+	}
+
+	/**
+	 * getByFileName
+	 *
+	 * @param {string} $file_name file name
+	 * @return {string} MIME type
+	 */
+	protected function getByFileName($file_name) {
+		$paths	 = explode(DIRECTORY_SEPARATOR, $file_name);
+		$file	 = array_pop($paths);
+		if ($file && ($pos	 = strrpos('.', $file)) !== false) {
+			$ext = substr($file, $pos + 1);
+		}
+		else {
+			$ext = '';
+		}
+		return $this->getByExtension($ext);
+	}
+
+	/**
+	 * getByExtension
+	 *
+	 * @param {string} $ext Extension
+	 * @return {string} MIME type
+	 */
+	protected function getByExtension($ext) {
+		static $_ext2mime = array(
+			'ez'		 => 'application/andrew-inset',
+			'atom'		 => 'application/atom+xml',
+			'oda'		 => 'application/oda',
+			'ogg'		 => 'application/ogg',
+			'pdf'		 => 'application/pdf',
+			'ai'		 => 'application/postscript',
+			'eps'		 => 'application/postscript',
+			'ps'		 => 'application/postscript',
+			'rdf'		 => 'application/rdf+xml',
+			'rtf'		 => 'application/rtf',
+			'smi'		 => 'application/smil',
+			'smil'		 => 'application/smil',
+			'gram'		 => 'application/srgs',
+			'grxml'		 => 'application/srgs+xml',
+			'apk'		 => 'application/vnd.android.package-archive',
+			'kml'		 => 'application/vnd.google-earth.kml+xml',
+			'kmz'		 => 'application/vnd.google-earth.kmz',
+			'xul'		 => 'application/vnd.mozilla.xul+xml',
+			'xls'		 => 'application/vnd.ms-excel',
+			'ppt'		 => 'application/vnd.ms-powerpoint',
+			'wbxml'		 => 'application/vnd.wap.wbxml',
+			'wmlc'		 => 'application/vnd.wap.wmlc',
+			'wmlsc'		 => 'application/vnd.wap.wmlscriptc',
+			'vxml'		 => 'application/voicexml+xml',
+			'bcpio'		 => 'application/x-bcpio',
+			'vcd'		 => 'application/x-cdlink',
+			'pgn'		 => 'application/x-chess-pgn',
+			'cpio'		 => 'application/x-cpio',
+			'csh'		 => 'application/x-csh',
+			'dcr'		 => 'application/x-director',
+			'dir'		 => 'application/x-director',
+			'dxr'		 => 'application/x-director',
+			'dvi'		 => 'application/x-dvi',
+			'ebk'		 => 'application/x-expandedbook',
+			'spl'		 => 'application/x-futuresplash',
+			'gtar'		 => 'application/x-gtar',
+			'hdf'		 => 'application/x-hdf',
+			'php'		 => 'application/x-httpd-php',
+			'jam'		 => 'application/x-jam',
+			'js'		 => 'text/javascript',
+			'kjx'		 => 'application/x-kj',
+			'skp'		 => 'application/x-koan',
+			'skd'		 => 'application/x-koan',
+			'skt'		 => 'application/x-koan',
+			'skm'		 => 'application/x-koan',
+			'latex'		 => 'application/x-latex',
+			'amc'		 => 'application/x-mpeg',
+			'nc'		 => 'application/x-netcdf',
+			'cdf'		 => 'application/x-netcdf',
+			'sh'		 => 'application/x-sh',
+			'shar'		 => 'application/x-shar',
+			'swf'		 => 'application/x-shockwave-flash',
+			'mmf'		 => 'application/x-smaf',
+			'sit'		 => 'application/x-stuffit',
+			'sv4cpio'	 => 'application/x-sv4cpio',
+			'sv4crc'	 => 'application/x-sv4crc',
+			'tar'		 => 'application/x-tar',
+			'tcl'		 => 'application/x-tcl',
+			'tex'		 => 'application/x-tex',
+			'texinfo'	 => 'application/x-texinfo',
+			'texi'		 => 'application/x-texinfo',
+			't'			 => 'application/x-troff',
+			'tr'		 => 'application/x-troff',
+			'roff'		 => 'application/x-troff',
+			'man'		 => 'application/x-troff-man',
+			'me'		 => 'application/x-troff-me',
+			'ms'		 => 'application/x-troff-ms',
+			'ustar'		 => 'application/x-ustar',
+			'src'		 => 'application/x-wais-source',
+			'zac'		 => 'application/x-zaurus-zac',
+			'xhtml'		 => 'application/xhtml+xml',
+			'xht'		 => 'application/xhtml+xml',
+			'dtd'		 => 'application/xml-dtd',
+			'xslt'		 => 'application/xslt+xml',
+			'zip'		 => 'application/zip',
+			'au'		 => 'audio/basic',
+			'snd'		 => 'audio/basic',
+			'mid'		 => 'audio/midi',
+			'midi'		 => 'audio/midi',
+			'kar'		 => 'audio/midi',
+			'mpga'		 => 'audio/mpeg',
+			'mp2'		 => 'audio/mpeg',
+			'mp3'		 => 'audio/mpeg',
+			'qcp'		 => 'audio/vnd.qcelp',
+			'aif'		 => 'audio/x-aiff',
+			'aiff'		 => 'audio/x-aiff',
+			'aifc'		 => 'audio/x-aiff',
+			'm3u'		 => 'audio/x-mpegurl',
+			'wax'		 => 'audio/x-ms-wax',
+			'wma'		 => 'audio/x-ms-wma',
+			'ram'		 => 'audio/x-pn-realaudio',
+			'rm'		 => 'audio/x-pn-realaudio',
+			'rpm'		 => 'audio/x-pn-realaudio-plugin',
+			'ra'		 => 'audio/x-realaudio',
+			'vqf'		 => 'audio/x-twinvq',
+			'vql'		 => 'audio/x-twinvq',
+			'vqe'		 => 'audio/x-twinvq-plugin',
+			'wav'		 => 'audio/x-wav',
+			'igs'		 => 'model/iges',
+			'iges'		 => 'model/iges',
+			'msh'		 => 'model/mesh',
+			'mesh'		 => 'model/mesh',
+			'silo'		 => 'model/mesh',
+			'wrl'		 => 'model/vrml',
+			'vrml'		 => 'model/vrml',
+			'ics'		 => 'text/calendar',
+			'ifb'		 => 'text/calendar',
+			'css'		 => 'text/css',
+			'html'		 => 'text/html',
+			'htm'		 => 'text/html',
+			'asc'		 => 'text/plain',
+			'txt'		 => 'text/plain',
+			'rtx'		 => 'text/richtext',
+			'sgml'		 => 'text/sgml',
+			'sgm'		 => 'text/sgml',
+			'tsv'		 => 'text/tab-separated-values',
+			'rt'		 => 'text/vnd.rn-realtext',
+			'jad'		 => 'text/vnd.sun.j2me.app-descriptor',
+			'wml'		 => 'text/vnd.wap.wml',
+			'wmls'		 => 'text/vnd.wap.wmlscript',
+			'hdml'		 => 'text/x-hdml;charset=Shift_JIS',
+			'etx'		 => 'text/x-setext',
+			'xml'		 => 'text/xml',
+			'xsl'		 => 'text/xml',
+			'mpeg'		 => 'video/mpeg',
+			'mpg'		 => 'video/mpeg',
+			'mpe'		 => 'video/mpeg',
+			'qt'		 => 'video/quicktime',
+			'mov'		 => 'video/quicktime',
+			'mxu'		 => 'video/vnd.mpegurl',
+			'm4u'		 => 'video/vnd.mpegurl',
+			'rv'		 => 'video/vnd.rn-realvideo',
+			'mng'		 => 'video/x-mng',
+			'asf'		 => 'video/x-ms-asf',
+			'asx'		 => 'video/x-ms-asf',
+			'avi'		 => 'video/x-msvideo',
+			'movie'		 => 'video/x-sgi-movie',
+			'ice'		 => 'x-conference/x-cooltalk',
+			'd96'		 => 'x-world/x-d96',
+			'mus'		 => 'x-world/x-d96',
+			'download'	 => 'application/force-download',
+			'json'		 => 'application/json',
+			'jpg'		 => 'image/jpeg',
+			'jpeg'		 => 'image/jpeg',
+			'png'		 => 'image/png',
+			'gif'		 => 'image/gif',
+		);
+		if (isset($_ext2mime[$ext])) {
+			return $_ext2mime[$ext];
+		}
+		else {
+			return '';
+		}
+	}
+
 }
 
 /**
  * MixiException
  * 
  */
-class MixiException extends Exception {
+class MixiException extends \Exception {
 
 	private $_api_err = '';
 
